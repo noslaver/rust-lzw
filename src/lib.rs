@@ -71,25 +71,25 @@ impl Decoder {
         for code in buf {
             if self.strings.get(code).is_none() {
                 if let Some(prev_string) = prev_string.clone() {
-                    let mut string = prev_string.clone();
-                    string.push(string[0]);
-                    self.strings.insert(*code, string);
+                    let mut prev_string = prev_string;
+                    prev_string.push(prev_string[0]);
+                    self.strings.insert(*code, prev_string);
                 }
             }
 
-            let string = self.strings.get(code).expect("Can't be None");
+            let string = self.strings.get(code).unwrap();
             for &c in string {
                 output.push(c);
             }
 
             if let Some(prev_string) = prev_string {
                 let mut value = prev_string.clone();
-                value.push(self.strings.get(code).expect("Can't be None")[0]);
+                value.push(self.strings.get(code).unwrap()[0]);
 
                 self.strings.insert(next_code, value);
                 next_code += 1;
             }
-            prev_string = Some(self.strings.get(code).expect("Can't be None").clone());
+            prev_string = Some(self.strings.get(code).unwrap().clone());
         }
 
         output
@@ -114,19 +114,25 @@ mod tests {
 
     #[test]
     fn it_decodes() {
+        // arrange
         let mut decoder = Decoder::new();
 
+        // act
         let out = decoder.decode_bytes(&[65, 66, 66, 257, 258, 260, 65]);
 
+        // assert
         assert_eq!(out, b"ABBABBBABBA");
     }
 
     #[test]
     fn edge_case() {
+        // arrange
         let mut decoder = Decoder::new();
 
+        // act
         let out = decoder.decode_bytes(&[65, 66, 257, 259]);
 
+        // assert
         assert_eq!(out, b"ABABABA");
     }
 
