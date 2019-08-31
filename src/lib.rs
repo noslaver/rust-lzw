@@ -1,55 +1,147 @@
-use byteorder::{BigEndian, WriteBytesExt};
 use std::collections::HashMap;
-use std::io::{BufReader, BufWriter, Read, Write};
+// use std::io::{BufReader, BufWriter, Read, Write};
 
 #[derive(Default)]
 pub struct Encoder {
-    codes: HashMap<String, u32>,
+    codes: HashMap<Vec<u8>, u32>,
 }
 
 impl Encoder {
-    // fn encode<R, W>(reader: BufReader<R>, writer: BufWriter<W>)
-    // where
-        // R: Read,
-        // W: Write,
-    // {
-    // }
+    pub fn new() -> Self {
+        Encoder {
+            codes: HashMap::new(),
+        }
+    }
 
-    fn encode_bytes(self, buf: &[u8]) -> std::io::Result<Vec<u8>> {
-        // TODO - initialize codes dictionary
+    pub fn encode_bytes(&mut self, buf: &[u8]) -> Vec<u32> {
+        // initialize codes dictionary
+        for n in 0..=255 {
+            self.codes.insert(vec![n], u32::from(n));
+        }
+        let mut next_code = 257;
+
         let mut output = Vec::new();
+        let mut string = Vec::new();
 
-        let mut string = String::new();
-
-        for c in buf {
-            let c = *c as char;
+        for &c in buf {
             string.push(c);
-            println!("str - {:?}", string);
-            if !self.codes.keys().any(|k| k.starts_with(&string)) {
+            if !self.codes.keys().any(|k| k.starts_with(&string[..])) {
+                // insert new code
+                self.codes.insert(string.clone(), next_code);
+                next_code += 1;
+
+                // output code for string up to the last character
                 string.pop();
-                output.write_u32::<BigEndian>(*self.codes.get(&string).expect("This can't be None!"))?;
+                output.push(*self.codes.get(&string).expect("This can't be None!"));
+
+                // reset current string
                 string.clear();
                 string.push(c);
             }
         }
-        output.write_u32::<BigEndian>(*self.codes.get(&string).expect("This can't be None!"))?;
+        output.push(*self.codes.get(&string).expect("This can't be None!"));
 
-        Ok(output)
+        output
+    }
+}
+
+#[derive(Default)]
+pub struct Decoder {
+    strings: HashMap<u32, Vec<u8>>,
+}
+
+impl Decoder {
+    pub fn new() -> Self {
+        Decoder {
+            strings: HashMap::new(),
+        }
+    }
+
+    pub fn decode_bytes(&mut self, buf: &[u32]) -> Vec<u8> {
+        for n in 1..=255 {
+            self.strings.insert(n, vec![n as u8]);
+        }
+
+        let mut output = Vec::new();
+
+        // pointer to previous decoded string
+        let mut prev_string: Option<Vec<u8>> = None;
+        let mut next_code = 257;
+
+        for code in buf {
+            if self.strings.get(code).is_none() {
+                if let Some(prev_string) = prev_string.clone() {
+                    let mut string = prev_string.clone();
+                    string.push(string[0]);
+                    self.strings.insert(*code, string);
+                }
+            }
+
+            let string = self.strings.get(code).expect("Can't be None");
+            for &c in string {
+                output.push(c);
+            }
+
+            if let Some(prev_string) = prev_string {
+                let mut value = prev_string.clone();
+                value.push(self.strings.get(code).expect("Can't be None")[0]);
+
+                self.strings.insert(next_code, value);
+                next_code += 1;
+            }
+            prev_string = Some(self.strings.get(code).expect("Can't be None").clone());
+        }
+
+        output
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Encoder;
+    use super::{Decoder, Encoder};
 
     #[test]
-    fn it_works() {
-        let mut encoder = Encoder::default();
+    fn it_encodes() {
+        // arrange
+        let mut encoder = Encoder::new();
 
-        encoder.codes.insert(String::from("AB"), 0x0001_1011);
-        encoder.codes.insert(String::from("B"), 0x1110_0100);
+        // act
+        let out = encoder.encode_bytes(b"ABBABBBABBA");
 
-        let out = encoder.encode_bytes(String::from("ABB").as_bytes()).unwrap();
-        assert_eq!(out, vec![0x00, 0x01, 0x10, 0x11, 0x11, 0x10, 0x01, 0x00]);
+        // assert
+        assert_eq!(out, vec![65, 66, 66, 257, 258, 260, 65]);
+    }
+
+    #[test]
+    fn it_decodes() {
+        let mut decoder = Decoder::new();
+
+        let out = decoder.decode_bytes(&[65, 66, 66, 257, 258, 260, 65]);
+
+        assert_eq!(out, b"ABBABBBABBA");
+    }
+
+    #[test]
+    fn edge_case() {
+        let mut decoder = Decoder::new();
+
+        let out = decoder.decode_bytes(&[65, 66, 257, 259]);
+
+        assert_eq!(out, b"ABABABA");
+    }
+
+    #[test]
+    fn it_round_trips() {
+        let mut encoder = Encoder::new();
+
+        let out = encoder.encode_bytes(b"ABBABBBABBA");
+
+        assert_eq!(out, vec![65, 66, 66, 257, 258, 260, 65]);
+
+        let mut decoder = Decoder::new();
+
+        let out = decoder.decode_bytes(out.as_slice());
+
+        assert_eq!(out, b"ABBABBBABBA");
     }
 }
